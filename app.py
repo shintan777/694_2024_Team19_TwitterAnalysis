@@ -140,7 +140,6 @@ def results_page():
         st.error(f"Error occurred while searching MongoDB: {e}")
 
 def user_info_page(username, mongo_collection):
-    # Connect to MySQL and fetch user information
     conn = mysql_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -155,7 +154,7 @@ def user_info_page(username, mongo_collection):
         conn.close()
     
     if user_info:
-        user_id = str(user_info.get('id'))  # Convert user ID to string
+        user_id = str(user_info.get('id'))  
         user_name = user_info.get('name', 'Unknown')
         user_screen_name = user_info.get('screen_name', 'Unknown')
         user_location = user_info.get('location', 'Unknown')
@@ -178,15 +177,13 @@ def user_info_page(username, mongo_collection):
         st.write(f"Friends Count: {friends_count}")
         st.write(f"Created At: {created_at}")
         st.write("---")
-        
-        # Display tweets by the user
-        # Display tweets by the user
+
         st.write(f"Tweets by user with username '{user_screen_name}' (ID: {user_id}):")
         try:
             user_tweets = mongo_collection.find({"user_id": int(user_id)})
             tweet_count = 0
             for tweet in user_tweets:
-                print(type(tweet), tweet)  # Debug statement
+                print(type(tweet), tweet) 
                 tweet_count += 1
                 tweet_text = tweet.get('text', 'No text available')
                 st.write(f"Tweet {tweet_count}: '{tweet_text}'")
