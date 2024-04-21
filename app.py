@@ -34,13 +34,29 @@ def mysql_db_connection():
     conn = mysql.connector.connect(
         host = "localhost",
         user = sql_username,
-        password = "password"
+        password = "password",
+        database = "twitter_user_data"
     )
     print("Connected to MySQL!")
     return conn
 
+def get_user_info(user_id):
+    conn = mysql_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    query = "SELECT * FROM users_info WHERE id = %s"
+    cursor.execute(query, (user_id,))
+    user_info = cursor.fetchone()
+    conn.close()
+    return user_info
+
+
 def main():
     st.title("Tweet Search Engine")
+
+    # Connect to MongoDB and fetch the collection
+    mongo_client = mongo_db_connection()
+    mongo_db = mongo_client.sample
+    mongo_collection = mongo_db.tweets
 
     # Get the current page from URL params
     current_page = st.experimental_get_query_params().get("page", ["search"])[0]
@@ -51,6 +67,13 @@ def main():
     # If on results page
     elif current_page == "results":
         results_page()
+    # If on user_info page
+    elif current_page == "user_info":
+        username = st.experimental_get_query_params().get("username", [None])[0]
+        if username:
+            user_info_page(username, mongo_collection)
+        else:
+            st.error("No username provided for user_info page.")
 
 
 def search_page():
@@ -59,10 +82,17 @@ def search_page():
     input_hashtag = st.text_input("Enter Hashtag (Optional)")
     input_language = st.selectbox("Select Language", ["en", "fr", "ge", "in", "Other"], index=0)
     
+    # User search input
+    user_search = st.text_input("Search for a user by username")
+
     # When search button is clicked, navigate to results page with search parameters
     if st.button("Search"):
-        # Set URL params for results page
-        st.experimental_set_query_params(page="results", keyword=input_keyword, hashtag=input_hashtag, language=input_language)
+        if user_search:
+            # Navigate to user info page
+            st.experimental_set_query_params(page="user_info", username=user_search)
+        else:
+            # Set URL params for results page
+            st.experimental_set_query_params(page="results", keyword=input_keyword, hashtag=input_hashtag, language=input_language)
 
 
 def results_page():
@@ -109,6 +139,60 @@ def results_page():
     except Exception as e:
         st.error(f"Error occurred while searching MongoDB: {e}")
 
+def user_info_page(username, mongo_collection):
+    conn = mysql_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        query = "SELECT * FROM users_info WHERE screen_name = %s"
+        cursor.execute(query, (username,))
+        user_info = cursor.fetchone()
+    except Exception as e:
+        st.error(f"Error occurred while fetching user information from MySQL: {e}")
+        return
+    finally:
+        cursor.close()
+        conn.close()
+    
+    if user_info:
+        user_id = str(user_info.get('id'))  
+        user_name = user_info.get('name', 'Unknown')
+        user_screen_name = user_info.get('screen_name', 'Unknown')
+        user_location = user_info.get('location', 'Unknown')
+        user_description = user_info.get('description', 'Unknown')
+        verified = user_info.get('verified', False)
+        followers_count = user_info.get('followers_count', 0)
+        friends_count = user_info.get('friends_count', 0)
+        created_at = user_info.get('created_at', 'Unknown')
+        
+        # Display user information
+        st.write(f"User Name: {user_name}")
+        st.write(f"Screen Name: {user_screen_name}")
+        st.write(f"Location: {user_location}")
+        st.write(f"Description: {user_description}")
+        if verified:
+            st.write("Verified: Verified")
+        else:
+            st.write("Verified: Not Verified")
+        st.write(f"Followers Count: {followers_count}")
+        st.write(f"Friends Count: {friends_count}")
+        st.write(f"Created At: {created_at}")
+        st.write("---")
+
+        st.write(f"Tweets by user with username '{user_screen_name}' (ID: {user_id}):")
+        try:
+            user_tweets = mongo_collection.find({"user_id": int(user_id)})
+            tweet_count = 0
+            for tweet in user_tweets:
+                print(type(tweet), tweet) 
+                tweet_count += 1
+                tweet_text = tweet.get('text', 'No text available')
+                st.write(f"Tweet {tweet_count}: '{tweet_text}'")
+        except Exception as e:
+            st.error(f"Error occurred while fetching user tweets from MongoDB: {e}")
+
+    else:
+        st.error(f"No user found with username '{username}' in MySQL.")
+
 
 def display_tweets(tweets, page_number, tweets_per_page):
     mongo_client = mongo_db_connection()
@@ -119,12 +203,28 @@ def display_tweets(tweets, page_number, tweets_per_page):
     end_index = min(page_number * tweets_per_page, len(tweets))
     for i in range(start_index, end_index):
         original_tweet = tweets[i]
-        with st.expander(original_tweet['text']):
+        user_id = original_tweet['user_id']
+        user_info = get_user_info(user_id)
+        user_name = user_info.get('name', 'Unknown') if user_info else 'Unknown'
+        
+        # Display the original tweet's text as the title of the expander along with the user name
+        original_tweet_text = original_tweet.get('text')
+        expander_title = f"Tweet by {user_name}: {original_tweet_text}"
+        
+        # Display retweets within the expander
+        with st.expander(expander_title):
+            # Display retweets
             retweets = collection.find({"retweeted_status.id_str": original_tweet["id_str"]})
             retweet_count = 0
             for retweet in retweets:
+                retweet_user_id = retweet['user_id']
+                retweet_user_info = get_user_info(retweet_user_id)
+                retweet_user_name = retweet_user_info.get('name', 'Unknown') if retweet_user_info else 'Unknown'
+                
                 retweet_count += 1
-                st.info(f"  - **Retweet {retweet_count}:**\n{retweet['text']}")
+                retweet_text = retweet.get('text')
+                st.info(f"  - **Retweet {retweet_count} by {retweet_user_name}:**\n{retweet_text}")
+
 
 
 if __name__ == "__main__":
