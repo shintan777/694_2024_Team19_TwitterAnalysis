@@ -55,8 +55,8 @@ def main():
 
     # Connect to MongoDB
     mongo_client = mongo_db_connection()
-    mongo_db = mongo_client.sample
-    mongo_collection = mongo_db.tweets
+    mongo_db = mongo_client.sample_test
+    mongo_collection = mongo_db.tweets_test
 
     # Get the current page from URL params
     current_page = st.experimental_get_query_params().get("page", ["search"])[0]
@@ -75,6 +75,7 @@ def main():
         else:
             st.error("No username provided for user_info page.")
 
+
 def search_page():
     st.subheader("Advanced Search Options")
     
@@ -89,26 +90,27 @@ def search_page():
         form_submit_button = st.form_submit_button(label='Search')
 
     if form_submit_button:
-        if user_search and (input_keyword or input_hashtag or input_language != "Select"):
-            # Navigate to user info page
-            st.experimental_set_query_params(page="user_info", username=user_search, keyword=input_keyword, hashtag=input_hashtag, language=input_language)
+        if user_search:
+            if not (input_keyword or input_hashtag or input_language != "Select"):
+                # Navigate to user info page
+                st.experimental_set_query_params(page="user_info", username=user_search)
+            else:
+                # Set URL params for results page
+                st.experimental_set_query_params(page="user_info", username=user_search, keyword=input_keyword, hashtag=input_hashtag, language=input_language)
         else:
             # Set URL params for results page
             st.experimental_set_query_params(page="results", keyword=input_keyword, hashtag=input_hashtag, language=input_language)
         st.experimental_rerun()
 
 
-def results_page(mongo_client): #Queries for search by keyword, hashtag, and language
-    # Get search parameters from URL params
+def results_page(mongo_client): 
     input_keyword = st.experimental_get_query_params().get("keyword", [""])[0]
     input_hashtag = st.experimental_get_query_params().get("hashtag", [""])[0]
     input_language = st.experimental_get_query_params().get("language", ["en"])[0]
 
-    # Fetch results based on search parameters
-    db = mongo_client.sample
-    collection = db.tweets
+    db = mongo_client.sample_test
+    collection = db.tweets_test
 
-    # Define the MongoDB query based on search parameters
     query = {"retweeted_status": {"$exists": False}}
     if input_keyword:
         query["text"] = {"$regex": input_keyword, "$options": "i"}
@@ -120,32 +122,26 @@ def results_page(mongo_client): #Queries for search by keyword, hashtag, and lan
     try:
         original_tweets = collection.find(query).sort([("retweet_count", -1), ("favorite_count", -1)])
 
-        # Collect top 50 tweets
         top_tweets = []
         for original_tweet in original_tweets:
-            retweet_exists = collection.find_one({"retweeted_status.id_str": original_tweet["id_str"]})
-            if retweet_exists:
-                top_tweets.append(original_tweet)
-                if len(top_tweets) == 50:
-                    break
+            top_tweets.append(original_tweet)
+            if len(top_tweets) == 50:
+                break
 
-        # Calculate number of pages
         num_pages = math.ceil(len(top_tweets) / 10)
 
-        # Pagination
         page_number = st.number_input("Page Number", min_value=1, max_value=num_pages, value=1, key="page_number")
         tweets_per_page = 10
 
-        # Display tweets for the selected page
         display_tweets(mongo_client, top_tweets, page_number, tweets_per_page)
     except Exception as e:
         st.error(f"Error occurred while searching MongoDB: {e}")
 
-def user_info_page(username, mongo_collection, keyword=None, hashtag=None):
+def user_info_page(username, mongo_collection, keyword=None, hashtag=None, language="Select"):
     # Connect to MySQL and fetch user information
     input_keyword = st.experimental_get_query_params().get("keyword", [""])[0]
     input_hashtag = st.experimental_get_query_params().get("hashtag", [""])[0]
-    input_language = st.experimental_get_query_params().get("language", ["en"])[0]
+    input_language = st.experimental_get_query_params().get("language", ["Select"])[0]
     conn = mysql_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -171,45 +167,67 @@ def user_info_page(username, mongo_collection, keyword=None, hashtag=None):
         created_at = user_info.get('created_at', 'Unknown')
 
         # Display user information
-        st.write(f"User Name: {user_name}")
-        st.write(f"Screen Name: {user_screen_name}")
-        st.write(f"Location: {user_location}")
-        st.write(f"Description: {user_description}")
-        if verified:
-            st.write("Verified: Verified")
-        else:
-            st.write("Verified: Not Verified")
-        st.write(f"Followers Count: {followers_count}")
-        st.write(f"Friends Count: {friends_count}")
-        st.write(f"Created At: {created_at}")
+        st.write(f"**Full Name:** {user_name} (@{user_screen_name}) {'✓' if verified else ''}")
+        st.write(f"**Location:** {user_location}")
+        st.write(f"**Description:** {user_description}")
+        st.write(f"**Followers Count:** {followers_count}")
+        st.write(f"**Friends Count:** {friends_count}")
+        st.write(f"**Created At:** {created_at}")
         st.write("---")
 
-        st.write(f"TWEETS BY '{user_screen_name}' (ID: {user_id}) based on favorite count:")
+        st.write("### TWEETS")
         try:
             # Define query criteria for keyword and hashtag
-            query_criteria = {"user_id": int(user_id)}
+            query_criteria = {"user_id": user_id}
             if input_keyword:
-                query_criteria["text"] = {"$regex": input_keyword, "$options": "i"}
+                query_criteria["$or"] = [{"text": {"$regex": input_keyword, "$options": "i"}}]
             if input_hashtag:
-                query_criteria["entities.hashtags.text"] = {"$regex": input_hashtag, "$options": "i"}
+                query_criteria["$or"] = [{"entities.hashtags.text": {"$regex": input_hashtag, "$options": "i"}}]
             if input_language != "Select":
                 query_criteria["lang"] = input_language
-
             # Find top 50 tweets based on favorite count
-            user_tweets = mongo_collection.find(query_criteria).sort("favorite_count", pymongo.DESCENDING).limit(50)
-
+            user_tweets = mongo_collection.find(query_criteria)
+            tweets = list(user_tweets)
+            if not tweets:
+                st.warning("No tweets found.")
+                return
             # Display tweets
-            for tweet in user_tweets:
+            for tweet in tweets:
                 st.write("---")
-                st.write(f"Tweet ID: {tweet['_id']}")
-                st.write(f"Text: {tweet['text']}")
-                st.write(f"Favorite Count: {tweet['favorite_count']}")
-                st.write(f"Retweet Count: {tweet['retweet_count']}")
-                st.write(f"Language: {tweet['lang']}")
+                st.write(f"**{tweet['text']}**")
+                # Display quoted tweet if available
+                quoted_status = tweet.get("quoted_status")
+                if quoted_status:
+                    quoted_tweet_text = quoted_status.get('text', 'No text available')
+                    st.write(f">>> Quoted Tweet: {quoted_tweet_text}")
+                retweet_count = tweet.get("retweet_count", 0)
+                favorite_count = tweet.get("favorite_count", 0)
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    st.write(f"\U0001F501  {retweet_count}")  # Retweet symbol
+                with col2:
+                    st.write(f"\U00002764  {favorite_count} ")  # Red heart emoji
+                                
+                # Display retweets
+                retweets = tweet.get("retweets", [])
+                retweet_count = len(retweets)
+                retweet_user_names = []
+                for i, retweet in enumerate(retweets):
+                    if i >= 30:
+                        break  # Exit loop after processing 30 retweets
+                    user_info = get_user_info(retweet.get('user_id'))
+                    if user_info:
+                        user_screen_name = user_info.get('screen_name', 'Unknown')
+                        user_display = f"[@{user_screen_name}](?page=user_info&username={user_screen_name})"
+                        retweet_user_names.append(user_display)
+                if retweet_user_names:
+                    st.info(f"Retweeted by: {', '.join(retweet_user_names)}")
         except Exception as e:
             st.error(f"Error occurred while fetching user tweets from MongoDB: {e}")
     else:
         st.error(f"No user found with username '{username}' in MySQL.")
+
+
 
 
 def display_tweets(mongo_client, tweets, page_number, tweets_per_page):
@@ -224,47 +242,49 @@ def display_tweets(mongo_client, tweets, page_number, tweets_per_page):
         user_info = get_user_info(user_id)
         user_name = user_info.get('name', 'Unknown') if user_info else 'Unknown'
         user_screen_name = user_info.get('screen_name', 'Unknown') if user_info else 'Unknown'
-        user_display = f"{user_name} ({user_screen_name})"
-        
-        # Display the original tweet's text as the title of the expander along with the user name
+        user_display = f"{user_name} ([@{user_screen_name}](?page=user_info&username={user_screen_name}))"
+
+        # Display the original tweet's text along with the user name
         original_tweet_text = original_tweet.get('text')
-        expander_title = f"Tweet by {user_display}: {original_tweet_text}"
-        
+        st.write("---")
+        st.write(f"### Tweet by {user_display}")
+        st.write(original_tweet_text)
         # Display quoted status if available
         quoted_status = original_tweet.get("quoted_status")
         if quoted_status:
             quoted_user_info = get_user_info(quoted_status['user_id'])
             quoted_user_name = quoted_user_info.get('name', 'Unknown') if quoted_user_info else 'Unknown'
             quoted_user_screen_name = quoted_user_info.get('screen_name', 'Unknown') if quoted_user_info else 'Unknown'
-            quoted_user_display = f"{quoted_user_name} ({quoted_user_screen_name})"
+            quoted_user_display = f"{quoted_user_name} ([@{quoted_user_screen_name}](?page=user_info&username={quoted_user_screen_name}))"
             quoted_tweet_text = quoted_status.get('text', 'No text available')
-        
-        # Display retweets within the expander
-        with st.expander(expander_title):
-            # Display retweets
-            retweets = collection.find({"retweeted_status.id_str": original_tweet["id_str"]})
-            retweet_count = 0
+            st.write(f">>> Quoted Tweet by {quoted_user_display}: {quoted_tweet_text}")
+        # Create columns to display retweet count and favorite count alongside the tweet
+        retweet_count = original_tweet.get("retweet_count", 0)
+        favorite_count = original_tweet.get("favorite_count", 0)
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.write(f"\U0001F501  {retweet_count}")  # Retweet symbol
+        with col2:
+            st.write(f"\U00002764  {favorite_count} ")  # Red heart emoji
+      
+        # Display retweets
+        retweets = original_tweet.get("retweets", [])
+        retweet_count = len(retweets)
+        if retweet_count == 0:
+            st.info("No retweets.")
+        else:
             retweet_user_names = []
-            for retweet in retweets:
-                retweet_text = retweet.get('text')
-                if retweet_text == original_tweet_text:
-                    retweet_user_id = retweet['user_id']
-                    retweet_user_info = get_user_info(retweet_user_id)
-                    retweet_user_name = retweet_user_info.get('name', 'Unknown') if retweet_user_info else 'Unknown'
-                    retweet_user_screen_name = retweet_user_info.get('screen_name', 'Unknown') if retweet_user_info else 'Unknown'
-                    retweet_user_display = f"{retweet_user_name} ({retweet_user_screen_name})"
-                    retweet_user_names.append(retweet_user_display)
-                    retweet_count += 1
-            if retweet_count == 0:
-                st.info("No retweets.")
-            else:
-                if retweet_user_names:
-                    st.info(f"Retweeted by: {', '.join(retweet_user_names)}")
-                else:
-                    st.info("No retweets with matching text.")
-            # Display quoted tweet
-            if quoted_status:
-                st.info(f"Quoted Tweet by {quoted_user_display}: {quoted_tweet_text}")
+            for i, retweet in enumerate(retweets):
+                if i >= 30:
+                    break  # Exit loop after processing 30 retweets
+                user_info = get_user_info(retweet.get('user_id'))
+                if user_info:
+                    user_name = user_info.get('name', 'Unknown')
+                    user_screen_name = user_info.get('screen_name', 'Unknown')
+                    user_display = f"{user_name} ([@{user_screen_name}](?page=user_info&username={user_screen_name}))"
+                    retweet_user_names.append(user_display)
+            if retweet_user_names:
+                st.info(f"Retweeted by: {', '.join(retweet_user_names)}")
 
 
 if __name__ == "__main__":
