@@ -12,6 +12,7 @@ from pprint import pprint
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from datetime import datetime
+import time
 
 def mongo_db_connection():
     load_dotenv()
@@ -34,14 +35,14 @@ def mysql_db_connection():
     conn = mysql.connector.connect(
         host = "localhost",
         user = sql_username,
-        password = "password",
+        password = sql_password,
         database = "twitter_user_data"
     )
     print("Connected to MySQL!")
     return conn
 
 def get_user_info(user_id):
-    conn = mysql_db_connection()
+#     conn = mysql_db_connection()
     cursor = conn.cursor(dictionary=True)
     query = "SELECT * FROM users_info WHERE id = %s"
     cursor.execute(query, (user_id,))
@@ -57,26 +58,27 @@ def main():
     mongo_client = mongo_db_connection()
     mongo_db = mongo_client.sample
     mongo_collection = mongo_db.tweets
+    
+    conn = mysql_db_connection()
 
-    # Get the current page from URL params
     current_page = st.experimental_get_query_params().get("page", ["search"])[0]
 
-    # If on search page
     if current_page == "search":
-        search_page()
-    # If on results page
+        search_page(mongo_collection, conn)
+
     elif current_page == "results":
-        results_page()
-    # If on user_info page
+        results_page(mongo_collection, conn)
+
     elif current_page == "user_info":
         username = st.experimental_get_query_params().get("username", [None])[0]
         if username:
-            user_info_page(username, mongo_collection)
+            user_info_page(username, mongo_collection, conn)
         else:
             st.error("No username provided for user_info page.")
 
 
-def search_page():
+
+def search_page(mongo_collection, conn):
     st.subheader("Advanced Search Options")
     input_keyword = st.text_input("Enter Keyword (Optional)")
     input_hashtag = st.text_input("Enter Hashtag (Optional)")
@@ -95,16 +97,20 @@ def search_page():
             st.experimental_set_query_params(page="results", keyword=input_keyword, hashtag=input_hashtag, language=input_language)
 
 
-def results_page():
+def results_page(mongo_collection, conn):
+    print("********")
+    print(keyword, hashtag, language)
+    print("********")
+    
     # Get search parameters from URL params
     input_keyword = st.experimental_get_query_params().get("keyword", [""])[0]
     input_hashtag = st.experimental_get_query_params().get("hashtag", [""])[0]
     input_language = st.experimental_get_query_params().get("language", ["en"])[0]
 
     # Connect to MongoDB and fetch results based on search parameters
-    mongo_client = mongo_db_connection()
-    db = mongo_client.sample
-    collection = db.tweets
+#     mongo_client = mongo_db_connection()
+#     db = mongo_client.sample
+#     collection = db.tweets
 
     # Define the MongoDB query based on search parameters
     query = {"retweeted_status": {"$exists": False}}
@@ -224,7 +230,6 @@ def display_tweets(tweets, page_number, tweets_per_page):
                 retweet_count += 1
                 retweet_text = retweet.get('text')
                 st.info(f"  - **Retweet {retweet_count} by {retweet_user_name}:**\n{retweet_text}")
-
 
 
 if __name__ == "__main__":
