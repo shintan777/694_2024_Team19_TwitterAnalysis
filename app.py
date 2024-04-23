@@ -1,14 +1,16 @@
 import streamlit as st
-import pymongo as pm
 import os
 import math
 import mysql.connector
+import pymongo
+import time
+
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from pprint import pprint
 from pymongo.mongo_client import MongoClient
-import pymongo
 from pymongo.server_api import ServerApi
+from datetime import datetime
 
 mongo_client = None
 
@@ -42,7 +44,7 @@ def mysql_db_connection():
     return conn
 
 def get_user_info(user_id):
-    conn = mysql_db_connection()
+#     conn = mysql_db_connection()
     cursor = conn.cursor(dictionary=True)
     query = "SELECT * FROM users_info WHERE id = %s"
     cursor.execute(query, (user_id,))
@@ -58,20 +60,18 @@ def main():
     mongo_db = mongo_client.sample_test
     mongo_collection = mongo_db.tweets_test
 
-    # Get the current page from URL params
     current_page = st.experimental_get_query_params().get("page", ["search"])[0]
 
-    # If on search page
     if current_page == "search":
         search_page()
-    # If on results page
+
     elif current_page == "results":
         results_page(mongo_client)
     # If on user_info page
     elif current_page == "user_info":
         username = st.experimental_get_query_params().get("username", [None])[0]
         if username:
-            user_info_page(username, mongo_collection)
+            user_info_page(username, mongo_collection, conn)
         else:
             st.error("No username provided for user_info page.")
 
@@ -231,8 +231,8 @@ def user_info_page(username, mongo_collection, keyword=None, hashtag=None, langu
 
 
 def display_tweets(mongo_client, tweets, page_number, tweets_per_page):
-    db = mongo_client.sample
-    collection = db.tweets
+    # db = mongo_client.sample
+    # collection = db.tweets
     st.write(f"## Page {page_number}")
     start_index = (page_number - 1) * tweets_per_page
     end_index = min(page_number * tweets_per_page, len(tweets))
@@ -257,7 +257,7 @@ def display_tweets(mongo_client, tweets, page_number, tweets_per_page):
             quoted_user_screen_name = quoted_user_info.get('screen_name', 'Unknown') if quoted_user_info else 'Unknown'
             quoted_user_display = f"{quoted_user_name} ([@{quoted_user_screen_name}](?page=user_info&username={quoted_user_screen_name}))"
             quoted_tweet_text = quoted_status.get('text', 'No text available')
-            st.write(f">>> Quoted Tweet by {quoted_user_display}: {quoted_tweet_text}")
+            st.write(f">>> Original Tweet by {quoted_user_display}: {quoted_tweet_text}")
         # Create columns to display retweet count and favorite count alongside the tweet
         retweet_count = original_tweet.get("retweet_count", 0)
         favorite_count = original_tweet.get("favorite_count", 0)
