@@ -1,6 +1,42 @@
 from pymongo import MongoClient
 from collections import OrderedDict
-import time
+import time, os
+# from app import mongo_db_connection
+from dotenv import load_dotenv
+load_dotenv()
+from pymongo.server_api import ServerApi
+import mysql.connector
+
+
+def mongo_db_connection():
+    mongo_client = None
+    if mongo_client is None:
+        load_dotenv()
+        mongo_username = os.environ.get("MONGOUSERNAME")
+        mongo_password = os.environ.get("MONGOPASSWORD")
+        uri = "mongodb+srv://{}:{}@twitter.qlewowk.mongodb.net/?retryWrites=true&w=majority&appName=twitter".format(mongo_username, mongo_password)
+        mongo_client = MongoClient(uri, server_api=ServerApi('1'))
+        try:
+            mongo_client.admin.command('ping')
+            print("Connected to MongoDB!")
+        except Exception as e:
+            print(e)
+    return mongo_client
+
+
+def mysql_db_connection():
+    sql_username = os.environ.get("SQLUSERNAME")
+    sql_password = os.environ.get("SQLPASSWORD")
+
+    conn = mysql.connector.connect(
+        host="localhost",
+        user=sql_username,
+        password=sql_password,
+        database="twitter_user_data"
+    )
+    print("Connected to MySQL!")
+    return conn
+
 
 class TwitterSearchApp:
     def __init__(self, max_cache_size=100):
@@ -9,9 +45,14 @@ class TwitterSearchApp:
         self.cache['user'] = OrderedDict()      # OrderedDict to implement LRU Cache
         self.cache['tweet'] = OrderedDict()
         self.cache['hashtag'] = OrderedDict()
-        self.cache_ttl = 60                     # TTL of 60 seconds for each cache entry
-        self.client = MongoClient('mongodb://localhost:27017/')
+        self.cache_ttl = 2                     # TTL of 60 seconds for each cache entry
+        # self.client = MongoClient('mongodb://localhost:27017/')
+        self.client = mongo_db_connection()
+        print("client",self.client)
         self.cache_collection = self.client['twitter_db']['cache']
+        self.db = self.client.sample
+        self.collection = self.db.tweets
+        self.conn = mysql_db_connection()
 
 
     def load_cache_from_mongodb(self):
@@ -67,15 +108,51 @@ class TwitterSearchApp:
 
     def query_mongodb_tweet(self, keyword):
         # Placeholder for MongoDB query, replace with actual query to search for tweets
-        return f"Dummy result for Tweets: {keyword}"
+        # return f"Dummy result for Tweets: {keyword}"
+        query = {"retweeted_status": {"$exists": False}}
+        query["text"] = {"$regex": keyword, "$options": "i"}
+        original_tweets = self.collection.find(query).sort([("retweet_count", -1), ("favorite_count", -1)])
+        print("original_tweets",original_tweets)
+
+        top_tweets = []
+        for original_tweet in original_tweets:
+            retweet_exists = self.collection.find_one({"retweeted_status.id_str": original_tweet["id_str"]})
+            if retweet_exists:
+                top_tweets.append(original_tweet)
+                if len(top_tweets) == 50:
+                    break
+        print("top_tweets",len(top_tweets))
+        return top_tweets
+
 
     def query_mongodb_user(self, keyword):
         # Placeholder for MongoDB query, replace with actual query to search for users
-        return f"Dummy result for User: {keyword}"
+        # return f"Dummy result for User: {keyword}"
+        cursor = self.conn.cursor(dictionary=True)
+        query = "SELECT * FROM users_info WHERE screen_name = %s"
+        cursor.execute(query, (keyword,))
+        user_info = cursor.fetchone()
+        conn.close()
+        return user_info
+
 
     def query_mongodb_hashtag(self, keyword):
         # Placeholder for MongoDB query, replace with actual query to search for hashtags
-        return f"Dummy result for Hashtag: {keyword}"
+        # return f"Dummy result for Hashtag: {keyword}"
+        query = {"retweeted_status": {"$exists": False}}
+        query["entities.hashtags.text"] = {"$regex": keyword, "$options": "i"}
+        original_tweets = self.collection.find(query).sort([("retweet_count", -1), ("favorite_count", -1)])
+        print("original_tweets",original_tweets)
+
+        top_tweets = []
+        for original_tweet in original_tweets:
+            retweet_exists = self.collection.find_one({"retweeted_status.id_str": original_tweet["id_str"]})
+            if retweet_exists:
+                top_tweets.append(original_tweet)
+                if len(top_tweets) == 50:
+                    break
+        print("top_tweets",len(top_tweets))
+        return top_tweets
 
     def shutdown(self):
         print("Shutting down", self.cache)
@@ -88,9 +165,9 @@ if __name__ == "__main__":
     app.load_cache_from_mongodb()
 
     # Example searches
-    print(app.search_tweet("data science"))
+    # print(app.search_tweet("prisoners"))
     # print(app.search_tweet("data science1"))
-    print(app.search_user("udit"))
-    print(app.search_hashtag("#python"))
+    # print(app.search_user("udit"))
+    print(app.search_hashtag("#Corona"))
 
     app.shutdown()
