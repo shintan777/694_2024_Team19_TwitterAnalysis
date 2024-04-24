@@ -38,6 +38,7 @@ def mysql_db_connection():
     return conn
 
 
+# +
 class TwitterSearchApp:
     def __init__(self, max_cache_size=100):
         self.max_cache_size = max_cache_size
@@ -45,15 +46,14 @@ class TwitterSearchApp:
         self.cache['user'] = OrderedDict()      # OrderedDict to implement LRU Cache
         self.cache['tweet'] = OrderedDict()
         self.cache['hashtag'] = OrderedDict()
-        self.cache_ttl = 2                     # TTL of 60 seconds for each cache entry
+        self.cache_ttl = float('inf') # TTL of 60 seconds for each cache entry
         # self.client = MongoClient('mongodb://localhost:27017/')
         self.client = mongo_db_connection()
-        print("client",self.client)
-        self.cache_collection = self.client['twitter_db']['cache']
-        self.db = self.client.sample
-        self.collection = self.db.tweets
+#         print("client",self.client)
+        self.cache_collection = self.client['twitter_db']['cache_test']
+        self.db = self.client.sample_test
+        self.collection = self.db.tweets_test
         self.conn = mysql_db_connection()
-
 
     def load_cache_from_mongodb(self):
         cache_data = self.cache_collection.find_one()
@@ -62,9 +62,9 @@ class TwitterSearchApp:
             self.cache['tweet'] = OrderedDict(cache_data['cache']['tweet'])
             self.cache['hashtag'] = OrderedDict(cache_data['cache']['hashtag'])
 
-
-    def search_cache(self, entity, keyword):    # entity = "user" / "tweet" / "hashtag" 
+    def search_cache(self, entity, keyword, lang="Select"):    # entity = "user" / "tweet" / "hashtag" 
         cache = self.cache[entity]
+        
         if keyword in cache:                    # Result found in cache
             print("Result found in cache")
             result = cache[keyword]['result']
@@ -74,14 +74,19 @@ class TwitterSearchApp:
                 return result
             else:                                           # Cache entry expired, delete the key
                 del cache[keyword]
-
+                
+        input_keyword, input_user, input_hashtag = None, None, None
+        
         print("Searching in MongoDB:")
         if entity == 'tweet':
-            result = self.query_mongodb_tweet(keyword)
+            input_keyword = keyword
         elif entity == 'user':
-            result = self.query_mongodb_user(keyword)
+            input_user = keyword
         elif entity == 'hashtag':
-            result = self.query_mongodb_hashtag(keyword)
+            input_hashtag = keyword
+
+        result = self.query_mongodb_tweet(input_keyword, input_hashtag, lang)
+
         if len(cache) >= self.max_cache_size:     # No space in the cache, delete the recently used entry
             cache.popitem(last=False)
         cache[keyword] = {
@@ -92,82 +97,124 @@ class TwitterSearchApp:
         return result
 
 
-    def search_tweet(self, keyword):
-        return self.search_cache('tweet', keyword)
-    
+#     def search_tweet(self, keyword):
+#         return self.search_cache('tweet', keyword)
 
-    def search_user(self, keyword):
-        return self.search_cache('user', keyword)
-
-
-    def search_hashtag(self, keyword):
-        if not keyword.startswith('#'):
-            keyword = f"#{keyword}"
-        return self.search_cache('hashtag', keyword)
+#     def search_user(self, keyword):
+#         return self.search_cache('user', keyword)
 
 
-    def query_mongodb_tweet(self, keyword):
-        # Placeholder for MongoDB query, replace with actual query to search for tweets
-        # return f"Dummy result for Tweets: {keyword}"
-        query = {"retweeted_status": {"$exists": False}}
-        query["text"] = {"$regex": keyword, "$options": "i"}
+#     def search_hashtag(self, keyword):
+#         if not keyword.startswith('#'):
+#             keyword = f"#{keyword}"
+#         return self.search_cache('hashtag', keyword)
+
+    def query_mongodb_tweet(self, input_keyword=None, input_hashtag=None, input_language="Select"):
+        query = {}
+        if input_keyword:
+            query["text"] = {"$regex": input_keyword, "$options": "i"}
+        if input_hashtag:
+            query["entities.hashtags.text"] = {"$regex": input_hashtag, "$options": "i"}
+        if input_language != "Select":
+            query["lang"] = input_language
+
         original_tweets = self.collection.find(query).sort([("retweet_count", -1), ("favorite_count", -1)])
-        print("original_tweets",original_tweets)
-
+ 
         top_tweets = []
         for original_tweet in original_tweets:
-            retweet_exists = self.collection.find_one({"retweeted_status.id_str": original_tweet["id_str"]})
-            if retweet_exists:
-                top_tweets.append(original_tweet)
-                if len(top_tweets) == 50:
-                    break
+            top_tweets.append(original_tweet)
+            if len(top_tweets) == 50:
+                break
+
         print("top_tweets",len(top_tweets))
         return top_tweets
 
-
-    def query_mongodb_user(self, keyword):
-        # Placeholder for MongoDB query, replace with actual query to search for users
-        # return f"Dummy result for User: {keyword}"
+    def query_sql_user(self, uid):
         cursor = self.conn.cursor(dictionary=True)
-        query = "SELECT * FROM users_info WHERE screen_name = %s"
-        cursor.execute(query, (keyword,))
+        query = "SELECT * FROM users_info WHERE id = %s"
+        cursor.execute(query, (uid,))
         user_info = cursor.fetchone()
-        conn.close()
         return user_info
 
 
-    def query_mongodb_hashtag(self, keyword):
-        # Placeholder for MongoDB query, replace with actual query to search for hashtags
-        # return f"Dummy result for Hashtag: {keyword}"
-        query = {"retweeted_status": {"$exists": False}}
-        query["entities.hashtags.text"] = {"$regex": keyword, "$options": "i"}
-        original_tweets = self.collection.find(query).sort([("retweet_count", -1), ("favorite_count", -1)])
-        print("original_tweets",original_tweets)
+#     def query_mongodb_hashtag(self, keyword):
+#         # Placeholder for MongoDB query, replace with actual query to search for hashtags
+#         # return f"Dummy result for Hashtag: {keyword}"
+#         query = {"retweeted_status": {"$exists": False}}
+#         query["entities.hashtags.text"] = {"$regex": keyword, "$options": "i"}
+#         original_tweets = self.collection.find(query).sort([("retweet_count", -1), ("favorite_count", -1)])
+#         print("original_tweets from mongo",original_tweets)
 
-        top_tweets = []
-        for original_tweet in original_tweets:
-            retweet_exists = self.collection.find_one({"retweeted_status.id_str": original_tweet["id_str"]})
-            if retweet_exists:
-                top_tweets.append(original_tweet)
-                if len(top_tweets) == 50:
-                    break
-        print("top_tweets",len(top_tweets))
-        return top_tweets
+#         top_tweets = []
+#         for original_tweet in original_tweets:
+#             retweet_exists = self.collection.find_one({"retweeted_status.id_str": original_tweet["id_str"]})
+#             if retweet_exists:
+#                 top_tweets.append(original_tweet)
+#                 if len(top_tweets) == 50:
+#                     break
+#         print("top_tweets",len(top_tweets))
+#         return top_tweets
 
     def shutdown(self):
         print("Shutting down", self.cache)
         self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
         self.client.close()
+# -
 
+app = TwitterSearchApp(max_cache_size=10)
+app.load_cache_from_mongodb()
+print(app.cache["tweet"].keys())
+
+# +
 # Example usage
-if __name__ == "__main__":
-    app = TwitterSearchApp(max_cache_size=10)
-    app.load_cache_from_mongodb()
+# if __name__ == "__main__":
+#     app = TwitterSearchApp(max_cache_size=10)
+#     app.load_cache_from_mongodb()
 
-    # Example searches
-    # print(app.search_tweet("prisoners"))
-    # print(app.search_tweet("data science1"))
-    # print(app.search_user("udit"))
-    print(app.search_hashtag("#Corona"))
+#     # Example searches
+#     print(app.search_tweet("prisoners"))
+#     # print(app.search_tweet("data science1"))
+#     # print(app.search_user("udit"))
+# #     print(app.search_hashtag("#Corona"))
 
-    app.shutdown()
+#     app.shutdown()
+
+# +
+# app = TwitterSearchApp(max_cache_size=2)
+# app.load_cache_from_mongodb()
+# print(app.cache)
+
+# +
+# app.search_cache("tweet", "weirdo")
+
+# +
+# print(app.cache)
+
+# +
+# app.search_cache("tweet", "weirdo")
+
+# +
+# app.search_cache("tweet", "death")
+
+# +
+# print(app.cache["tweet"].keys())
+
+# +
+# app.search_cache("tweet", "corona")
+
+# +
+# print(app.cache["tweet"].keys())
+
+# +
+# app.search_cache("tweet", "corona")
+
+# +
+# print(app.cache["tweet"].keys())
+
+# +
+# app.shutdown()
+
+# +
+# app = TwitterSearchApp(max_cache_size=2)
+# app.load_cache_from_mongodb()
+# print(app.cache)
