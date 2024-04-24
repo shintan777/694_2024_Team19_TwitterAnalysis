@@ -74,7 +74,7 @@ def main():
     elif current_page == "user_info":
         username = st.experimental_get_query_params().get("username", [None])[0]
         if username:
-            user_info_page(username, mongo_collection)
+            user_info_page(username)
         else:
             st.error("No username provided for user_info page.")
 
@@ -220,23 +220,17 @@ def display_tweets(tweets, page_number, tweets_per_page):
                 st.info(f"Retweeted by: {', '.join(retweet_user_names)}")
 
 
-def user_info_page(username, mongo_collection, keyword=None, hashtag=None, language="Select"):
+def user_info_page(username, keyword=None, hashtag=None, language="Select"):
+    global app
     # Connect to MySQL and fetch user information
     input_keyword = st.experimental_get_query_params().get("keyword", [""])[0]
     input_hashtag = st.experimental_get_query_params().get("hashtag", [""])[0]
     input_language = st.experimental_get_query_params().get("language", ["Select"])[0]
-    conn = mysql_db_connection()
-    cursor = conn.cursor(dictionary=True)
     try:
-        query = "SELECT * FROM users_info WHERE screen_name = %s"
-        cursor.execute(query, (username,))
-        user_info = cursor.fetchone()
+        user_info = app.query_sql_user_info(username)
     except Exception as e:
         st.error(f"Error occurred while fetching user information from MySQL: {e}")
         return
-    finally:
-        cursor.close()
-        conn.close()
 
     if user_info:
         user_id = str(user_info.get('id'))
@@ -260,17 +254,10 @@ def user_info_page(username, mongo_collection, keyword=None, hashtag=None, langu
 
         st.write("### TWEETS")
         try:
-            # Define query criteria for keyword and hashtag
-            query_criteria = {"user_id": user_id}
-            if input_keyword:
-                query_criteria["$or"] = [{"text": {"$regex": input_keyword, "$options": "i"}}]
-            if input_hashtag:
-                query_criteria["$or"] = [{"entities.hashtags.text": {"$regex": input_hashtag, "$options": "i"}}]
-            if input_language != "Select":
-                query_criteria["lang"] = input_language
-            # Find top 50 tweets based on favorite count
-            user_tweets = mongo_collection.find(query_criteria)
+            user_tweets = app.tweets_for_users(user_id, input_keyword, input_hashtag, input_language)
             tweets = list(user_tweets)
+            print(len(tweets))
+            
             if not tweets:
                 st.warning("No tweets found.")
                 return

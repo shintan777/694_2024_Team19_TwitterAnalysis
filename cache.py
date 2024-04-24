@@ -134,9 +134,28 @@ class TwitterSearchApp:
         query = "SELECT * FROM users_info WHERE id = %s"
         cursor.execute(query, (uid,))
         user_info = cursor.fetchone()
+        cursor.close()
+        return user_info
+    
+    def query_sql_user_info(self, username):
+        cursor = self.conn.cursor(dictionary=True)
+        query = "SELECT * FROM users_info WHERE screen_name = %s"
+        cursor.execute(query, (username,))
+        user_info = cursor.fetchone()
+        cursor.close()
         return user_info
 
-
+    def tweets_for_users(self, user_id, input_keyword, input_hashtag, input_language):
+        query_criteria = {"user_id": user_id}
+        if input_keyword:
+            query_criteria["$or"] = [{"text": {"$regex": input_keyword, "$options": "i"}}]
+        if input_hashtag:
+            query_criteria["$or"] = [{"entities.hashtags.text": {"$regex": input_hashtag, "$options": "i"}}]
+        if input_language != "Select":
+            query_criteria["lang"] = input_language
+            # Find top 50 tweets based on favorite count
+        user_tweets = self.collection.find(query_criteria).sort([("retweet_count", -1), ("favorite_count", -1)])
+        return user_tweets
 #     def query_mongodb_hashtag(self, keyword):
 #         # Placeholder for MongoDB query, replace with actual query to search for hashtags
 #         # return f"Dummy result for Hashtag: {keyword}"
