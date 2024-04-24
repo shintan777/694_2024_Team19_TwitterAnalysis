@@ -1,18 +1,25 @@
 import streamlit as st
+import pymongo as pm
 import os
 import math
+from datetime import datetime
 import mysql.connector
-import pymongo
-import time
-
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from pprint import pprint
 from pymongo.mongo_client import MongoClient
+import pymongo
 from pymongo.server_api import ServerApi
-from datetime import datetime
 
 mongo_client = None
+
+def format_tweet_date(date_string):
+    try:
+        parsed_date = datetime.strptime(date_string, "%a %b %d %H:%M:%S %z %Y")
+        formatted_date = parsed_date.strftime("%m/%d/%Y %I:%M %p")
+        return formatted_date
+    except ValueError:
+        return "Invalid date format"
 
 def mongo_db_connection():
     global mongo_client
@@ -44,7 +51,7 @@ def mysql_db_connection():
     return conn
 
 def get_user_info(user_id):
-#     conn = mysql_db_connection()
+    conn = mysql_db_connection()
     cursor = conn.cursor(dictionary=True)
     query = "SELECT * FROM users_info WHERE id = %s"
     cursor.execute(query, (user_id,))
@@ -53,25 +60,27 @@ def get_user_info(user_id):
     return user_info
 
 def main():
-    st.title("Tweet Search Engine")
+    st.title("TWEET SEARCH ENGINE")
 
     # Connect to MongoDB
     mongo_client = mongo_db_connection()
     mongo_db = mongo_client.sample_test
     mongo_collection = mongo_db.tweets_test
 
+    # Get the current page from URL params
     current_page = st.experimental_get_query_params().get("page", ["search"])[0]
 
+    # If on search page
     if current_page == "search":
         search_page()
-
+    # If on results page
     elif current_page == "results":
         results_page(mongo_client)
     # If on user_info page
     elif current_page == "user_info":
         username = st.experimental_get_query_params().get("username", [None])[0]
         if username:
-            user_info_page(username, mongo_collection, conn)
+            user_info_page(username, mongo_collection)
         else:
             st.error("No username provided for user_info page.")
 
@@ -82,11 +91,8 @@ def search_page():
     with st.form(key='search_form'):
         input_keyword = st.text_input("Enter Keyword (Optional)")
         input_hashtag = st.text_input("Enter Hashtag (Optional)")
+        user_search = st.text_input("Enter username (Optional)")
         input_language = st.selectbox("Select Language", ["Select","en", "fr", "ge", "in"], index=0)
-        
-        # User search input
-        user_search = st.text_input("Search for a user by username")
-
         form_submit_button = st.form_submit_button(label='Search')
 
     if form_submit_button:
@@ -120,7 +126,7 @@ def results_page(mongo_client):
         query["lang"] = input_language
 
     try:
-        original_tweets = collection.find(query).sort([("retweet_count", -1), ("favorite_count", -1)])
+        original_tweets = collection.find(query)
 
         top_tweets = []
         for original_tweet in original_tweets:
@@ -133,9 +139,59 @@ def results_page(mongo_client):
         page_number = st.number_input("Page Number", min_value=1, max_value=num_pages, value=1, key="page_number")
         tweets_per_page = 10
 
+        # Display top users and top tweets with multiple metrics on sidebar
+        st.sidebar.title("Top Users and Tweets")
+        metric = st.sidebar.selectbox("Select Metric", ["Top Users", "Top Tweets"])
+
+        conn = mysql_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            if metric == "Top Users":
+                # Fetch user information including names and followers count
+                query = "SELECT screen_name, name, followers_count FROM users_info ORDER BY followers_count DESC LIMIT 5"
+                cursor.execute(query)
+                top_users = cursor.fetchall()
+                # Display top users on sidebar
+                st.sidebar.subheader("Top Users by Followers Count")
+                st.sidebar.write("---")
+                for user in top_users:
+                    user_name = user.get('name', 'Unknown')
+                    user_screen_name = user.get('screen_name', 'Unknown')
+                    followers_count = user.get('followers_count', 0)
+                    # Add hyperlinks to the username
+                    user_link = f"[{user_name} (@{user_screen_name})](?page=user_info&username={user_screen_name})"
+                    st.sidebar.markdown(f"**{user_link}**")
+                    st.sidebar.write(f"Followers: {followers_count}")
+                    st.sidebar.write("---")
+            elif metric == "Top Tweets":
+                # Fetch top tweets with highest favorite count
+                query = {"retweeted_status": {"$exists": False}}
+                top_tweets_query = collection.find(query).sort("favorite_count", pymongo.DESCENDING).limit(5)
+                top_tweets = list(top_tweets_query)
+                # Display top tweets on sidebar
+                st.sidebar.subheader("Top Tweets by Favorite Count")
+                for tweet in top_tweets:
+                    user_id = tweet.get('user_id', 'Unknown')
+                    user_info = get_user_info(user_id)
+                    user_name = user_info.get('screen_name', 'Unknown') if user_info else 'Unknown'
+                    user_link = f"[@{user_name}](?page=user_info&username={user_name})"
+                    tweet_text = tweet.get('text', 'Unknown')
+                    favorite_count = tweet.get('favorite_count', 0)
+                    st.sidebar.write(f"User: @{user_link}")
+                    st.sidebar.write(f"Tweet: {tweet_text}")
+                    st.sidebar.write(f"Favorite Count: {favorite_count}")
+                    st.sidebar.write("---")
+        except Exception as e:
+            st.error(f"Error occurred while fetching top users and tweets: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+
         display_tweets(mongo_client, top_tweets, page_number, tweets_per_page)
     except Exception as e:
         st.error(f"Error occurred while searching MongoDB: {e}")
+
+
 
 def user_info_page(username, mongo_collection, keyword=None, hashtag=None, language="Select"):
     # Connect to MySQL and fetch user information
@@ -165,16 +221,20 @@ def user_info_page(username, mongo_collection, keyword=None, hashtag=None, langu
         followers_count = user_info.get('followers_count', 0)
         friends_count = user_info.get('friends_count', 0)
         created_at = user_info.get('created_at', 'Unknown')
+        profile_pic_url = "https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png"
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.write(f"### {user_name} (@{user_screen_name}) {'✓' if verified else ''}")
+            st.write(f"**Location:** {user_location}")
+            st.write(f"**Description:** {user_description}")
+            st.write(f"**Followers Count:** {followers_count}")
+            st.write(f"**Friends Count:** {friends_count}")
+            st.write(f"**Created At:** {created_at}")
+            st.write("---")
+        with col2:
+            st.image(profile_pic_url, width=100)
 
-        # Display user information
-        st.write(f"**Full Name:** {user_name} (@{user_screen_name}) {'✓' if verified else ''}")
-        st.write(f"**Location:** {user_location}")
-        st.write(f"**Description:** {user_description}")
-        st.write(f"**Followers Count:** {followers_count}")
-        st.write(f"**Friends Count:** {friends_count}")
-        st.write(f"**Created At:** {created_at}")
-        st.write("---")
-
+        
         st.write("### TWEETS")
         try:
             # Define query criteria for keyword and hashtag
@@ -231,8 +291,6 @@ def user_info_page(username, mongo_collection, keyword=None, hashtag=None, langu
 
 
 def display_tweets(mongo_client, tweets, page_number, tweets_per_page):
-    # db = mongo_client.sample
-    # collection = db.tweets
     st.write(f"## Page {page_number}")
     start_index = (page_number - 1) * tweets_per_page
     end_index = min(page_number * tweets_per_page, len(tweets))
@@ -246,9 +304,12 @@ def display_tweets(mongo_client, tweets, page_number, tweets_per_page):
 
         # Display the original tweet's text along with the user name
         original_tweet_text = original_tweet.get('text')
+        created_at = original_tweet.get('created_at', 'Unknown')
+        created_at_formatted = format_tweet_date(created_at)
         st.write("---")
         st.write(f"### Tweet by {user_display}")
         st.write(original_tweet_text)
+        st.write(f"📅: {created_at_formatted}")
         # Display quoted status if available
         quoted_status = original_tweet.get("quoted_status")
         if quoted_status:
@@ -257,7 +318,8 @@ def display_tweets(mongo_client, tweets, page_number, tweets_per_page):
             quoted_user_screen_name = quoted_user_info.get('screen_name', 'Unknown') if quoted_user_info else 'Unknown'
             quoted_user_display = f"{quoted_user_name} ([@{quoted_user_screen_name}](?page=user_info&username={quoted_user_screen_name}))"
             quoted_tweet_text = quoted_status.get('text', 'No text available')
-            st.write(f">>> Original Tweet by {quoted_user_display}: {quoted_tweet_text}")
+            st.write(f">>> Quoted Tweet by {quoted_user_display}: {quoted_tweet_text}")
+        
         # Create columns to display retweet count and favorite count alongside the tweet
         retweet_count = original_tweet.get("retweet_count", 0)
         favorite_count = original_tweet.get("favorite_count", 0)
@@ -285,7 +347,6 @@ def display_tweets(mongo_client, tweets, page_number, tweets_per_page):
                     retweet_user_names.append(user_display)
             if retweet_user_names:
                 st.info(f"Retweeted by: {', '.join(retweet_user_names)}")
-
 
 if __name__ == "__main__":
     main()
