@@ -43,13 +43,11 @@ class TwitterSearchApp:
     def __init__(self, max_cache_size=100):
         self.max_cache_size = max_cache_size
         self.cache = {}
-        self.cache['user'] = OrderedDict()      # OrderedDict to implement LRU Cache
+        self.cache['user'] = OrderedDict() 
         self.cache['tweet'] = OrderedDict()
         self.cache['hashtag'] = OrderedDict()
-        self.cache_ttl = float('inf') # TTL of 60 seconds for each cache entry
-        # self.client = MongoClient('mongodb://localhost:27017/')
+        self.cache_ttl = float('inf') 
         self.client = mongo_db_connection()
-#         print("client",self.client)
         self.cache_collection = self.client['twitter_db']['cache_test']
         self.db = self.client.sample_test
         self.collection = self.db.tweets_test
@@ -62,10 +60,19 @@ class TwitterSearchApp:
             self.cache['tweet'] = OrderedDict(cache_data['cache']['tweet'])
             self.cache['hashtag'] = OrderedDict(cache_data['cache']['hashtag'])
 
-    def search_cache(self, entity, keyword, lang="Select"):    # entity = "user" / "tweet" / "hashtag" 
+    def search_cache(self, entity, keyword = None, user_deets = [], lang="Select"):    # entity = "user" / "tweet" / "hashtag" 
+
         cache = self.cache[entity]
-        
-        if keyword in cache:                    # Result found in cache
+        if user_deets:
+            uid, uname = user_deets[0], user_deets[1]
+            if uid:
+                keyword = uid
+            elif uname:
+                keyword = uname
+            else:
+                print("Incorrect User deets")
+            
+        if keyword in cache:                    
             print("Result found in cache")
             result = cache[keyword]['result']
             timestamp = cache[keyword]['timestamp']
@@ -77,15 +84,30 @@ class TwitterSearchApp:
                 
         input_keyword, input_user, input_hashtag = None, None, None
         
-        print("Searching in MongoDB:")
         if entity == 'tweet':
             input_keyword = keyword
         elif entity == 'user':
             input_user = keyword
         elif entity == 'hashtag':
             input_hashtag = keyword
-
-        result = self.query_mongodb_tweet(input_keyword, input_hashtag, lang)
+            
+        if input_keyword or input_hashtag:
+            result = self.query_mongodb_tweet(input_keyword, input_hashtag, lang)
+            
+        elif input_user:
+            if uid:
+                result = self.query_sql_user(uid)
+            elif uname:
+                result = self.query_sql_user_info(uname)
+            else:
+                print("Incorrect User deets")
+            
+            if result:
+                print("user found in sql db")
+            else:
+                print("no user found")
+        else:
+            print("Incorrect params")
 
         if len(cache) >= self.max_cache_size:     # No space in the cache, delete the recently used entry
             cache.popitem(last=False)
@@ -95,7 +117,6 @@ class TwitterSearchApp:
         }
         # self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
         return result
-
 
 #     def search_tweet(self, keyword):
 #         return self.search_cache('tweet', keyword)
@@ -156,6 +177,7 @@ class TwitterSearchApp:
             # Find top 50 tweets based on favorite count
         user_tweets = self.collection.find(query_criteria).sort([("retweet_count", -1), ("favorite_count", -1)])
         return user_tweets
+    
 #     def query_mongodb_hashtag(self, keyword):
 #         # Placeholder for MongoDB query, replace with actual query to search for hashtags
 #         # return f"Dummy result for Hashtag: {keyword}"
@@ -183,6 +205,7 @@ class TwitterSearchApp:
 app = TwitterSearchApp(max_cache_size=10)
 app.load_cache_from_mongodb()
 print(app.cache["tweet"].keys())
+print(app.cache["user"].keys())
 
 # +
 # Example usage

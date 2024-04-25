@@ -55,14 +55,16 @@ def get_user_info(user_id):
     conn.close()
     return user_info
 
+def on_close():
+    global app
+    print("Shutting down")
+    app.shutdown()
+
+
 def main():
     global app
     st.title("Tweet Search Engine")
-    # Connect to MongoDB
-#     mongo_client = mongo_db_connection()
-#     mongo_db = mongo_client.sample_test
-#     mongo_collection = mongo_db.tweets_test
-
+    
     current_page = st.experimental_get_query_params().get("page", ["search"])[0]
 
     if current_page == "search":
@@ -131,6 +133,8 @@ def get_mongo_query(collection, input_keyword=None, input_hashtag=None, input_la
 # +
 def results_page(): 
     global app
+    
+    start_time = time.time()
     input_keyword = st.experimental_get_query_params().get("keyword", [""])[0]
     input_hashtag = st.experimental_get_query_params().get("hashtag", [""])[0]
     input_language = st.experimental_get_query_params().get("language", ["en"])[0]
@@ -148,7 +152,7 @@ def results_page():
         num_pages = math.ceil(len(top_tweets) / 10)
         page_number = st.number_input("Page Number", min_value=1, max_value=num_pages, value=1, key="page_number")
         tweets_per_page = 10
-
+        
         display_tweets(top_tweets, page_number, tweets_per_page)
     except Exception as e:
         st.error(f"Error occurred while searching MongoDB: {e}")
@@ -167,10 +171,8 @@ def display_tweets(tweets, page_number, tweets_per_page):
     for i in range(start_index, end_index):
         original_tweet = tweets[i]
         user_id = original_tweet['user_id']
-        user_info = app.query_sql_user(user_id)
-#         pprint(user_info)
-#         user_info = get_user_info(user_id)
-
+        user_info = app.search_cache("user", user_deets = [user_id, None])
+        
         user_name = user_info.get('name', 'Unknown') if user_info else 'Unknown'
         user_screen_name = user_info.get('screen_name', 'Unknown') if user_info else 'Unknown'
         user_display = f"{user_name} ([@{user_screen_name}](?page=user_info&username={user_screen_name}))"
@@ -184,7 +186,7 @@ def display_tweets(tweets, page_number, tweets_per_page):
         quoted_status = original_tweet.get("quoted_status")
         if quoted_status:
 #             quoted_user_info = get_user_info(quoted_status['user_id'])
-            quoted_user_info = app.query_sql_user(quoted_status['user_id'])
+            quoted_user_info = app.search_cache("user", user_deets = [quoted_status['user_id'], None])
             quoted_user_name = quoted_user_info.get('name', 'Unknown') if quoted_user_info else 'Unknown'
             quoted_user_screen_name = quoted_user_info.get('screen_name', 'Unknown') if quoted_user_info else 'Unknown'
             quoted_user_display = f"{quoted_user_name} ([@{quoted_user_screen_name}](?page=user_info&username={quoted_user_screen_name}))"
@@ -210,7 +212,8 @@ def display_tweets(tweets, page_number, tweets_per_page):
                 if i >= 30:
                     break  # Exit loop after processing 30 retweets
 #                 user_info = get_user_info(retweet.get('user_id'))
-                user_info = app.query_sql_user(retweet.get('user_id'))
+                user_info = app.search_cache("user", user_deets = [retweet.get('user_id'), None])
+                print(app.cache["user"].keys())
                 if user_info:
                     user_name = user_info.get('name', 'Unknown')
                     user_screen_name = user_info.get('screen_name', 'Unknown')
@@ -218,6 +221,8 @@ def display_tweets(tweets, page_number, tweets_per_page):
                     retweet_user_names.append(user_display)
             if retweet_user_names:
                 st.info(f"Retweeted by: {', '.join(retweet_user_names)}")
+    end_time = time.time()
+    st.write("Search Results in {} seconds".format(end_time - start_time))     
 
 
 def user_info_page(username, keyword=None, hashtag=None, language="Select"):
@@ -227,7 +232,8 @@ def user_info_page(username, keyword=None, hashtag=None, language="Select"):
     input_hashtag = st.experimental_get_query_params().get("hashtag", [""])[0]
     input_language = st.experimental_get_query_params().get("language", ["Select"])[0]
     try:
-        user_info = app.query_sql_user_info(username)
+        user_info = app.search_cache("user", user_deets = [None, username])
+
     except Exception as e:
         st.error(f"Error occurred while fetching user information from MySQL: {e}")
         return
@@ -285,7 +291,7 @@ def user_info_page(username, keyword=None, hashtag=None, language="Select"):
                 for i, retweet in enumerate(retweets):
                     if i >= 30:
                         break  # Exit loop after processing 30 retweets
-                    user_info = get_user_info(retweet.get('user_id'))
+                    user_info = app.search_cache("user", user_deets = [retweet.get('user_id'), None])
                     if user_info:
                         user_screen_name = user_info.get('screen_name', 'Unknown')
                         user_display = f"[@{user_screen_name}](?page=user_info&username={user_screen_name})"
