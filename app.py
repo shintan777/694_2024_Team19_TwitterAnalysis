@@ -15,7 +15,7 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
 from cache import app
-# mongo_client = None
+mongo_client = None
 
 
 def shutdown():
@@ -24,8 +24,9 @@ def shutdown():
     #app.shutdown()
 
 
-atexit.register(shutdown)
-
+# +
+#atexit.register(shutdown)
+# -
 
 def format_tweet_date(date_string):
     try:
@@ -118,9 +119,9 @@ def results_page(keyword=None, hashtag=None, language="Select", start_date=None,
 
         top_tweets = []
         if input_keyword:
-            top_tweets += app.search_cache("tweet", input_keyword, input_language)
+            top_tweets += app.search_cache(entity = "tweet", keyword = input_keyword, lang = input_language)
         if input_hashtag:
-            top_tweets += app.search_cache("hashtag", input_keyword, input_language)
+            top_tweets += app.search_cache(entity = "hashtag", keyword = input_keyword, lang = input_language)
 
         num_pages = math.ceil(len(top_tweets) / 10)
         page_number = st.number_input("Page Number", min_value=1, max_value=num_pages, value=1, key="page_number")
