@@ -11,10 +11,24 @@ import asyncio
 
 # For static cache implementation
 import nltk
-from app import mongo_db_connection
-from nltk.tokenize import word_tokenize
+nltk.download('corpora')
 from nltk.corpus import stopwords
 from collections import Counter
+
+def mongo_db_connection():
+    mongo_client = None
+    if mongo_client is None:
+        load_dotenv()
+        mongo_username = os.environ.get("MONGOUSERNAME")
+        mongo_password = os.environ.get("MONGOPASSWORD")
+        uri = "mongodb+srv://{}:{}@twitter.qlewowk.mongodb.net/?retryWrites=true&w=majority&appName=twitter".format(mongo_username, mongo_password)
+        mongo_client = MongoClient(uri, server_api=ServerApi('1'))
+        try:
+            mongo_client.admin.command('ping')
+            print("Connected to MongoDB!")
+        except Exception as e:
+            print(e)
+    return mongo_client
 
 def mysql_db_connection():
     sql_username = os.environ.get("SQLUSERNAME")
@@ -28,7 +42,6 @@ def mysql_db_connection():
     )
     print("Connected to MySQL!")
     return conn
-
 
 # +
 class TwitterSearchApp:
