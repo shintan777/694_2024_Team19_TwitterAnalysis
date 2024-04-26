@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 from pymongo.server_api import ServerApi
 import mysql.connector
-
+import schedule
+import asyncio
 
 def mongo_db_connection():
     mongo_client = None
@@ -196,16 +197,28 @@ class TwitterSearchApp:
 #         print("top_tweets",len(top_tweets))
 #         return top_tweets
 
+
+    async def checkpoint(self):
+        print("Checkpointing")
+        self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
+
+
     def shutdown(self):
         print("Shutting down", self.cache)
         self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
         self.client.close()
-# -
 
-app = TwitterSearchApp(max_cache_size=10)
-app.load_cache_from_mongodb()
-print(app.cache["tweet"].keys())
-print(app.cache["user"].keys())
+
+async def main():
+    app = TwitterSearchApp(max_cache_size=10)
+    app.load_cache_from_mongodb()
+    print(app.cache["tweet"].keys())
+    while True:
+        await asyncio.sleep(300)    # Checkpoint every 5 minutes
+        await app.checkpoint()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
 # +
 # Example usage
