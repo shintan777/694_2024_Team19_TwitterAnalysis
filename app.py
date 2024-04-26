@@ -72,8 +72,8 @@ def main():
 
     # Connect to MongoDB
     mongo_client = mongo_db_connection()
-    mongo_db = mongo_client.sample_test
-    mongo_collection = mongo_db.tweets_test
+    mongo_db = mongo_client.corona3
+    mongo_collection = mongo_db.tweets
 
     # Get the current page from URL params
     current_page = st.experimental_get_query_params().get("page", ["search"])[0]
@@ -115,7 +115,9 @@ def search_page():
                 # Set URL params for results page
                 st.experimental_set_query_params(page="user_info", username=user_search, keyword=input_keyword, hashtag=input_hashtag, language=input_language)
         else:
+            start_date = start_date.strftime("%m-%d-%Y")
             # Set URL params for results page
+            end_date = end_date.strftime("%m-%d-%Y")
             st.experimental_set_query_params(page="results", keyword=input_keyword, hashtag=input_hashtag, language=input_language, start_date=start_date, end_date=end_date)
         st.experimental_rerun()
 
@@ -136,6 +138,8 @@ def results_page(mongo_client, keyword=None, hashtag=None, language="Select", st
         query["entities.hashtags.text"] = {"$regex": input_hashtag, "$options": "i"}
     if input_language != "Select":
         query["lang"] = input_language
+    #if input_start_date and input_end_date:
+    #    query["created_at"] = {"$gte": input_start_date, "$lte": input_end_date}
 
     try:
         original_tweets = collection.find(query).sort([("favorite_count", pymongo.DESCENDING), ("retweet_count", pymongo.DESCENDING), ("created_at", pymongo.DESCENDING)])
