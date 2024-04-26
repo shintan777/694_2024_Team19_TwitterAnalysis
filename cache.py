@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 from pymongo.server_api import ServerApi
 import mysql.connector
-import schedule
-import asyncio
+# import schedule
+# import asyncio
 
 # For static cache implementation
 import nltk
@@ -65,6 +65,7 @@ class TwitterSearchApp:
             self.cache['tweet'] = OrderedDict(cache_data['cache']['tweet'])
             self.cache['hashtag'] = OrderedDict(cache_data['cache']['hashtag'])
 
+ 
     def search_cache(self, entity, keyword = None, user_deets = [], lang="Select"):    # entity = "user" / "tweet" / "hashtag" 
 
         cache = self.cache[entity]
@@ -78,41 +79,42 @@ class TwitterSearchApp:
                 print("Incorrect User deets")
             
         if keyword in cache:                    
-            print("Result found in cache")
+            print("Result found in cache for ", keyword)
+            print(cache[keyword]['result'])
             result = cache[keyword]['result']
             timestamp = cache[keyword]['timestamp']
             if time.time() - cache[keyword]['timestamp'] < self.cache_ttl:    # Cache entry still valid
                 cache.move_to_end(keyword)                  # Mark entry as recently used
-                return result
             else:                                           # Cache entry expired, delete the key
                 del cache[keyword]
-                
-        input_keyword, input_user, input_hashtag = None, None, None
-        
-        if entity == 'tweet':
-            input_keyword = keyword
-        elif entity == 'user':
-            input_user = keyword
-        elif entity == 'hashtag':
-            input_hashtag = keyword
-            
-        if input_keyword or input_hashtag:
-            result = self.query_mongodb_tweet(input_keyword, input_hashtag, lang)
-            
-        elif input_user:
-            if uid:
-                result = self.query_sql_user(uid)
-            elif uname:
-                result = self.query_sql_user_info(uname)
-            else:
-                print("Incorrect User deets")
-            
-            if result:
-                print("user found in sql db")
-            else:
-                print("no user found")
         else:
-            print("Incorrect params")
+                
+            input_keyword, input_user, input_hashtag = None, None, None
+
+            if entity == 'tweet':
+                input_keyword = keyword
+            elif entity == 'user':
+                input_user = keyword
+            elif entity == 'hashtag':
+                input_hashtag = keyword
+
+            if input_keyword or input_hashtag:
+                result = self.query_mongodb_tweet(input_keyword, input_hashtag, lang)
+
+            elif input_user:
+                if uid:
+                    result = self.query_sql_user(uid)
+                elif uname:
+                    result = self.query_sql_user_info(uname)
+                else:
+                    print("Incorrect User deets")
+
+                if result:
+                    print("user found in sql db")
+                else:
+                    print("no user found")
+            else:
+                print("Incorrect params")
 
         if len(cache) >= self.max_cache_size:     # No space in the cache, delete the recently used entry
             cache.popitem(last=False)
@@ -120,7 +122,7 @@ class TwitterSearchApp:
             "result": result,
             "timestamp": time.time()
         }
-        # self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
+        self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
         return result
 
 #     def search_tweet(self, keyword):
@@ -238,22 +240,25 @@ class TwitterSearchApp:
         self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
         self.client.close()
 
+app = TwitterSearchApp(max_cache_size=10)
+app.load_cache_from_mongodb()
+print(app.cache["tweet"].keys())
 
-async def main():
-    app = TwitterSearchApp(max_cache_size=10)
-    app.load_cache_from_mongodb()
-    app.cache_top_10_keywords()
-    print(app.cache["tweet"].keys())
+# def main():
+#     app = TwitterSearchApp(max_cache_size=10)
+#     app.load_cache_from_mongodb()
+#     app.cache_top_10_keywords()
+#     print(app.cache["tweet"].keys())
     
-    # create a cron to cache top 10 keywords daily at midnight
-    schedule.every().day.at("00:00").do(app.cache_top_10_keywords)
-    while True:
-        await asyncio.sleep(300)    # Checkpoint every 5 minutes
-        await app.checkpoint()
-        schedule.run_pending()
+#     # create a cron to cache top 10 keywords daily at midnight
+#     schedule.every().day.at("00:00").do(app.cache_top_10_keywords)
+#     while True:
+#         await asyncio.sleep(300)    # Checkpoint every 5 minutes
+#         await app.checkpoint()
+#         schedule.run_pending()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# if __name__ == "__main__":
+#     asyncio.run(main())
 
 # +
 # Example usage
