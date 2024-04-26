@@ -1,75 +1,50 @@
 import streamlit as st
+import pymongo as pm
 import os
 import math
-import mysql.connector
 import pymongo
+import mysql.connector
 import time
+import atexit
 
+from datetime import datetime
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from pprint import pprint
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-from datetime import datetime
 
 from cache import app
-
 mongo_client = None
-# app = None
 
-def mongo_db_connection():
-    global mongo_client
-    if mongo_client is None:
-        load_dotenv()
-        mongo_username = os.environ.get("MONGOUSERNAME")
-        mongo_password = os.environ.get("MONGOPASSWORD")
-        uri = "mongodb+srv://{}:{}@twitter.qlewowk.mongodb.net/?retryWrites=true&w=majority&appName=twitter".format(mongo_username, mongo_password)
-        mongo_client = MongoClient(uri, server_api=ServerApi('1'))
-        try:
-            mongo_client.admin.command('ping')
-            print("Connected to MongoDB!")
-        except Exception as e:
-            print(e)
-    return mongo_client
 
-def mysql_db_connection():
-    load_dotenv()
-    sql_username = os.environ.get("SQLUSERNAME")
-    sql_password = os.environ.get("SQLPASSWORD")
-
-    conn = mysql.connector.connect(
-        host="localhost",
-        user=sql_username,
-        password=sql_password,
-        database="twitter_user_data"
-    )
-    print("Connected to MySQL!")
-    return conn
-
-def get_user_info(user_id):
-    conn = mysql_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    query = "SELECT * FROM users_info WHERE id = %s"
-    cursor.execute(query, (user_id,))
-    user_info = cursor.fetchone()
-    conn.close()
-    return user_info
-
-def on_close():
+def shutdown():
     global app
     print("Shutting down")
-    app.shutdown()
+    #app.shutdown()
 
+
+atexit.register(shutdown)
+
+
+def format_tweet_date(date_string):
+    try:
+        parsed_date = datetime.strptime(date_string, "%a %b %d %H:%M:%S %z %Y")
+        formatted_date = parsed_date.strftime("%m/%d/%Y %I:%M %p")
+        return formatted_date
+    except ValueError:
+        return "Invalid date format"
 
 def main():
-    global app
-    st.title("Tweet Search Engine")
-    
+    st.title("TWEET SEARCH ENGINE")
+
+    # Get the current page from URL params
     current_page = st.experimental_get_query_params().get("page", ["search"])[0]
 
+    # If on search page
     if current_page == "search":
         search_page()
-
+    # If on results page
     elif current_page == "results":
         results_page()
     # If on user_info page
@@ -87,11 +62,8 @@ def search_page():
     with st.form(key='search_form'):
         input_keyword = st.text_input("Enter Keyword (Optional)")
         input_hashtag = st.text_input("Enter Hashtag (Optional)")
+        user_search = st.text_input("Enter username (Optional)")
         input_language = st.selectbox("Select Language", ["Select","en", "fr", "ge", "in"], index=0)
-        
-        # User search input
-        user_search = st.text_input("Search for a user by username")
-
         form_submit_button = st.form_submit_button(label='Search')
 
     if form_submit_button:
@@ -105,31 +77,6 @@ def search_page():
         st.experimental_rerun()
 
 
-def get_mongo_query(collection, input_keyword=None, input_hashtag=None, input_language="Select"):
-    db = mongo_client.sample_test
-    collection = db.tweets_test
-    top_tweets = []
-
-    query = {"retweeted_status": {"$exists": False}}
-    if input_keyword:
-        query["text"] = {"$regex": input_keyword, "$options": "i"}
-    if input_hashtag:
-        query["entities.hashtags.text"] = {"$regex": input_hashtag, "$options": "i"}
-    if input_language != "Select":
-        query["lang"] = input_language
-    try:
-        original_tweets = collection.find(query).sort([("retweet_count", -1), ("favorite_count", -1)])
-
-        for original_tweet in original_tweets:
-            top_tweets.append(original_tweet)
-            if len(top_tweets) == 50:
-                break
-    except Exception as e:
-        print(e)
-
-    return top_tweets
-
-
 # +
 def results_page(): 
     global app
@@ -139,9 +86,6 @@ def results_page():
     input_hashtag = st.experimental_get_query_params().get("hashtag", [""])[0]
     input_language = st.experimental_get_query_params().get("language", ["en"])[0]
 
-#     db = mongo_client.sample_test
-#     collection = db.tweets_test
-#     query = {"retweeted_status": {"$exists": False}}
     try:
         top_tweets = []
         if input_keyword:
@@ -152,18 +96,66 @@ def results_page():
         num_pages = math.ceil(len(top_tweets) / 10)
         page_number = st.number_input("Page Number", min_value=1, max_value=num_pages, value=1, key="page_number")
         tweets_per_page = 10
-        
-        display_tweets(top_tweets, page_number, tweets_per_page)
+
+        st.sidebar.title("Top Users and Tweets")
+        metric = st.sidebar.selectbox("Select Metric", ["Top Users", "Top Tweets"])
+
+
+        # Perform an action when the value changes
+        # Define your options (list of strings)
+#         options = ['Option 1', 'Option 2', 'Option 3']
+
+#         # Create the select box
+#         selected_option = st.selectbox('Select an option', options)
+
+#         if st.session_state.selected_option != selected_option:
+#             st.session_state.selected_option = selected_option
+#             # Your custom action goes here
+#             st.write(f"Selected option changed to: {selected_option}")
+
+        cursor = app.conn.cursor(dictionary=True)
+        try:
+            if metric == "Top Users":
+                query = "SELECT screen_name, name, followers_count FROM users_info ORDER BY followers_count DESC LIMIT 5"
+                cursor.execute(query)
+                top_users = cursor.fetchall()
+                st.sidebar.subheader("Top Users by Followers Count")
+                st.sidebar.write("---")
+                for user in top_users:
+                    user_name = user.get('name', 'Unknown')
+                    user_screen_name = user.get('screen_name', 'Unknown')
+                    followers_count = user.get('followers_count', 0)
+                    user_link = f"[{user_name} (@{user_screen_name})](?page=user_info&username={user_screen_name})"
+                    st.sidebar.markdown(f"**{user_link}**")
+                    st.sidebar.write(f"Followers: {followers_count}")
+                    st.sidebar.write("---")
+            if metric == "Top Tweets":
+                query = {"retweeted_status": {"$exists": False}}
+                top_tweets_query = app.collection.find(query).sort("favorite_count", pymongo.DESCENDING).limit(5)
+                top_tweets = list(top_tweets_query)
+                st.sidebar.subheader("Top Tweets by Favorite Count")
+                for tweet in top_tweets:
+                    user_id = tweet.get('user_id', 'Unknown')
+                    user_info = app.search_cache("user", user_deets = [user_id, None])
+                    user_name = user_info.get('screen_name', 'Unknown') if user_info else 'Unknown'
+                    user_link = f"[@{user_name}](?page=user_info&username={user_name})"
+                    tweet_text = tweet.get('text', 'Unknown')
+                    favorite_count = tweet.get('favorite_count', 0)
+                    st.sidebar.write(f"User: @{user_link}")
+                    st.sidebar.write(f"Tweet: {tweet_text}")
+                    st.sidebar.write(f"Favorite Count: {favorite_count}")
+                    st.sidebar.write("---")
+        except Exception as e:
+            st.error(f"Error occurred while fetching top users and tweets: {e}")
+  
+        display_tweets(top_tweets, page_number, tweets_per_page, start_time)
     except Exception as e:
         st.error(f"Error occurred while searching MongoDB: {e}")
 
-
 # -
 
-def display_tweets(tweets, page_number, tweets_per_page):
+def display_tweets(tweets, page_number, tweets_per_page, start_time):
     global app
-    # db = mongo_client.sample
-    # collection = db.tweets
     print(app.cache["tweet"].keys())
     st.write(f"## Page {page_number}")
     start_index = (page_number - 1) * tweets_per_page
@@ -177,11 +169,14 @@ def display_tweets(tweets, page_number, tweets_per_page):
         user_screen_name = user_info.get('screen_name', 'Unknown') if user_info else 'Unknown'
         user_display = f"{user_name} ([@{user_screen_name}](?page=user_info&username={user_screen_name}))"
 
-        # Display the original tweet's text along with the user name
         original_tweet_text = original_tweet.get('text')
+        created_at = original_tweet.get('created_at', 'Unknown')
+        created_at_formatted = format_tweet_date(created_at)
         st.write("---")
         st.write(f"### Tweet by {user_display}")
         st.write(original_tweet_text)
+        st.write(f"📅: {created_at_formatted}")
+        
         # Display quoted status if available
         quoted_status = original_tweet.get("quoted_status")
         if quoted_status:
@@ -227,7 +222,7 @@ def display_tweets(tweets, page_number, tweets_per_page):
 
 def user_info_page(username, keyword=None, hashtag=None, language="Select"):
     global app
-    # Connect to MySQL and fetch user information
+
     input_keyword = st.experimental_get_query_params().get("keyword", [""])[0]
     input_hashtag = st.experimental_get_query_params().get("hashtag", [""])[0]
     input_language = st.experimental_get_query_params().get("language", ["Select"])[0]
@@ -248,16 +243,20 @@ def user_info_page(username, keyword=None, hashtag=None, language="Select"):
         followers_count = user_info.get('followers_count', 0)
         friends_count = user_info.get('friends_count', 0)
         created_at = user_info.get('created_at', 'Unknown')
+        profile_pic_url = "https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png"
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.write(f"### {user_name} (@{user_screen_name}) {'✓' if verified else ''}")
+            st.write(f"**Location:** {user_location}")
+            st.write(f"**Description:** {user_description}")
+            st.write(f"**Followers Count:** {followers_count}")
+            st.write(f"**Friends Count:** {friends_count}")
+            st.write(f"**Created At:** {created_at}")
+            st.write("---")
+        with col2:
+            st.image(profile_pic_url, width=100)
 
-        # Display user information
-        st.write(f"**Full Name:** {user_name} (@{user_screen_name}) {'✓' if verified else ''}")
-        st.write(f"**Location:** {user_location}")
-        st.write(f"**Description:** {user_description}")
-        st.write(f"**Followers Count:** {followers_count}")
-        st.write(f"**Friends Count:** {friends_count}")
-        st.write(f"**Created At:** {created_at}")
-        st.write("---")
-
+        
         st.write("### TWEETS")
         try:
             user_tweets = app.tweets_for_users(user_id, input_keyword, input_hashtag, input_language)
@@ -302,7 +301,6 @@ def user_info_page(username, keyword=None, hashtag=None, language="Select"):
             st.error(f"Error occurred while fetching user tweets from MongoDB: {e}")
     else:
         st.error(f"No user found with username '{username}' in MySQL.")
-
 
 if __name__ == "__main__":
     main()
