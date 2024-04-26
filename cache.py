@@ -9,21 +9,12 @@ import mysql.connector
 import schedule
 import asyncio
 
-def mongo_db_connection():
-    mongo_client = None
-    if mongo_client is None:
-        load_dotenv()
-        mongo_username = os.environ.get("MONGOUSERNAME")
-        mongo_password = os.environ.get("MONGOPASSWORD")
-        uri = "mongodb+srv://{}:{}@twitter.qlewowk.mongodb.net/?retryWrites=true&w=majority&appName=twitter".format(mongo_username, mongo_password)
-        mongo_client = MongoClient(uri, server_api=ServerApi('1'))
-        try:
-            mongo_client.admin.command('ping')
-            print("Connected to MongoDB!")
-        except Exception as e:
-            print(e)
-    return mongo_client
-
+# For static cache implementation
+import nltk
+from app import mongo_db_connection
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from collections import Counter
 
 def mysql_db_connection():
     sql_username = os.environ.get("SQLUSERNAME")
@@ -197,12 +188,38 @@ class TwitterSearchApp:
 #         print("top_tweets",len(top_tweets))
 #         return top_tweets
 
-
+    
     async def checkpoint(self):
         print("Checkpointing")
         self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
 
+    def cache_top_10_keywords(self):
+        # parse through each tweet and maintain a dict of top 10 keywords
+        # Retrieve all tweets
+        print("Started caching top keywords in tweets: " + time.time())
+        tweets = self.collection.find({}, {"text": 1})
 
+        # Define stopwords - words to ignore
+        stop_words = set(stopwords.words('english'))
+
+        # Count occurrences of each keyword in all tweets
+        keyword_count = Counter()
+        for tweet in tweets:
+            text = tweet["text"]
+            keywords = extract_keywords(text, stop_words)
+            keyword_count.update(keywords)
+
+        # Get top 10 keywords and store in cache
+        top_keywords = keyword_count.most_common(10)
+        for keyword in top_keywords:
+            self.search_cache(keyword)
+        print("Completed caching top keywords in tweets: " + time.time())
+
+    def cron_cache_top_keywords(self):
+        print("Cron for caching has started at: " +  + time.time())
+        self.cache_top_10_keywords(self)
+        print("Cron for caching is completed at: " +  + time.time())
+        
     def shutdown(self):
         print("Shutting down", self.cache)
         self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
@@ -212,10 +229,15 @@ class TwitterSearchApp:
 async def main():
     app = TwitterSearchApp(max_cache_size=10)
     app.load_cache_from_mongodb()
+    app.cache_top_10_keywords()
     print(app.cache["tweet"].keys())
+    
+    # create a cron to cache top 10 keywords daily at midnight
+    schedule.every().day.at("00:00").do(app.cache_top_10_keywords)
     while True:
         await asyncio.sleep(300)    # Checkpoint every 5 minutes
         await app.checkpoint()
+        schedule.run_pending()
 
 if __name__ == "__main__":
     asyncio.run(main())
