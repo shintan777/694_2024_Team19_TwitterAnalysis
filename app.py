@@ -14,7 +14,7 @@ from pprint import pprint
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
-from cache import app
+from cache import main
 mongo_client = None
 
 
