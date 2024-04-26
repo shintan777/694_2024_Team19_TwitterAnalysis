@@ -80,7 +80,7 @@ class TwitterSearchApp:
             
         if keyword in cache:                    
             print("Result found in cache for ", keyword)
-            print(cache[keyword]['result'])
+            # print(cache[keyword]['result'])
             result = cache[keyword]['result']
             timestamp = cache[keyword]['timestamp']
             if time.time() - cache[keyword]['timestamp'] < self.cache_ttl:    # Cache entry still valid
