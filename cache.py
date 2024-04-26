@@ -238,22 +238,22 @@ class TwitterSearchApp:
         self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
         self.client.close()
 
-
-async def main():
-    app = TwitterSearchApp(max_cache_size=10)
-    app.load_cache_from_mongodb()
-    app.cache_top_10_keywords()
-    print(app.cache["tweet"].keys())
+app = TwitterSearchApp(max_cache_size=10)
+app.load_cache_from_mongodb()
+print(app.cache["tweet"].keys())
+# async def main():
     
-    # create a cron to cache top 10 keywords daily at midnight
-    schedule.every().day.at("00:00").do(app.cache_top_10_keywords)
-    while True:
-        await asyncio.sleep(300)    # Checkpoint every 5 minutes
-        await app.checkpoint()
-        schedule.run_pending()
+#     app.cache_top_10_keywords()
+    
+#     # create a cron to cache top 10 keywords daily at midnight
+#     schedule.every().day.at("00:00").do(app.cache_top_10_keywords)
+#     while True:
+#         await asyncio.sleep(300)    # Checkpoint every 5 minutes
+#         await app.checkpoint()
+#         schedule.run_pending()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# if __name__ == "__main__":
+#     asyncio.run(main())
 
 # +
 # Example usage

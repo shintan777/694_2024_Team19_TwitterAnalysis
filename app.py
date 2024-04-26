@@ -14,8 +14,8 @@ from pprint import pprint
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
-from cache import main
-mongo_client = None
+from cache import app
+# mongo_client = None
 
 
 def shutdown():
@@ -91,7 +91,7 @@ def search_page():
 
 
 # +
-def results_page(mongo_client, keyword=None, hashtag=None, language="Select", start_date=None, end_date=None): 
+def results_page(keyword=None, hashtag=None, language="Select", start_date=None, end_date=None): 
     global app
     
     start_time = time.time()
@@ -100,8 +100,8 @@ def results_page(mongo_client, keyword=None, hashtag=None, language="Select", st
     input_language = st.experimental_get_query_params().get("language", ["Select"])[0]
     input_start_date = st.experimental_get_query_params().get("start_date", [None])[0]
     input_end_date = st.experimental_get_query_params().get("end_date", [None])[0]
-    db = mongo_client.sample_test
-    collection = db.tweets_test
+    # db = mongo_client.sample_test
+    # collection = db.tweets_test
 
     query = {"retweeted_status": {"$exists": False}}
     if input_keyword:
@@ -114,7 +114,7 @@ def results_page(mongo_client, keyword=None, hashtag=None, language="Select", st
     #    query["created_at"] = {"$gte": input_start_date, "$lte": input_end_date}
 
     try:
-        original_tweets = collection.find(query).sort([("favorite_count", pymongo.DESCENDING), ("retweet_count", pymongo.DESCENDING), ("created_at", pymongo.DESCENDING)])
+        original_tweets = app.collection.find(query).sort([("favorite_count", pymongo.DESCENDING), ("retweet_count", pymongo.DESCENDING), ("created_at", pymongo.DESCENDING)])
 
         top_tweets = []
         if input_keyword:
