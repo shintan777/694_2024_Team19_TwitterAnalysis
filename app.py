@@ -72,8 +72,8 @@ def main():
 
     # Connect to MongoDB
     mongo_client = mongo_db_connection()
-    mongo_db = mongo_client.corona3
-    mongo_collection = mongo_db.tweets
+    mongo_db = mongo_client.sample_test
+    mongo_collection = mongo_db.tweets_test
 
     # Get the current page from URL params
     current_page = st.experimental_get_query_params().get("page", ["search"])[0]
