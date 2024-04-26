@@ -34,6 +34,14 @@ def format_tweet_date(date_string):
         return formatted_date
     except ValueError:
         return "Invalid date format"
+    
+def format_tweet_datetime(date_string):
+    try:
+        parsed_date = datetime.strptime(date_string, "%m/%d/%Y")
+        formatted_date = parsed_date.strftime("%m/%d/%Y %I:%M %p")
+        return parsed_date
+    except ValueError:
+        return "Invalid date format"
 
 def main():
     st.title("TWEET SEARCH ENGINE")
@@ -63,6 +71,9 @@ def search_page():
         input_keyword = st.text_input("Enter Keyword (Optional)")
         input_hashtag = st.text_input("Enter Hashtag (Optional)")
         user_search = st.text_input("Enter username (Optional)")
+        start_date = st.date_input("Start Date", datetime(2010, 1, 1))
+        end_date = st.date_input("End Date", datetime.now())
+        
         input_language = st.selectbox("Select Language", ["Select","en", "fr", "ge", "in"], index=0)
         form_submit_button = st.form_submit_button(label='Search')
 
@@ -73,20 +84,38 @@ def search_page():
             else:
                 st.experimental_set_query_params(page="user_info", username=user_search, keyword=input_keyword, hashtag=input_hashtag, language=input_language)
         else:
-            st.experimental_set_query_params(page="results", keyword=input_keyword, hashtag=input_hashtag, language=input_language)
+            start_date = start_date.strftime("%m-%d-%Y")
+            end_date = end_date.strftime("%m-%d-%Y")
+            st.experimental_set_query_params(page="results", keyword=input_keyword, hashtag=input_hashtag, language=input_language, start_date=start_date, end_date=end_date)
         st.experimental_rerun()
 
 
 # +
-def results_page(): 
+def results_page(mongo_client, keyword=None, hashtag=None, language="Select", start_date=None, end_date=None): 
     global app
     
     start_time = time.time()
     input_keyword = st.experimental_get_query_params().get("keyword", [""])[0]
     input_hashtag = st.experimental_get_query_params().get("hashtag", [""])[0]
-    input_language = st.experimental_get_query_params().get("language", ["en"])[0]
+    input_language = st.experimental_get_query_params().get("language", ["Select"])[0]
+    input_start_date = st.experimental_get_query_params().get("start_date", [None])[0]
+    input_end_date = st.experimental_get_query_params().get("end_date", [None])[0]
+    db = mongo_client.sample_test
+    collection = db.tweets_test
+
+    query = {"retweeted_status": {"$exists": False}}
+    if input_keyword:
+        query["text"] = {"$regex": input_keyword, "$options": "i"}
+    if input_hashtag:
+        query["entities.hashtags.text"] = {"$regex": input_hashtag, "$options": "i"}
+    if input_language != "Select":
+        query["lang"] = input_language
+    #if input_start_date and input_end_date:
+    #    query["created_at"] = {"$gte": input_start_date, "$lte": input_end_date}
 
     try:
+        original_tweets = collection.find(query).sort([("favorite_count", pymongo.DESCENDING), ("retweet_count", pymongo.DESCENDING), ("created_at", pymongo.DESCENDING)])
+
         top_tweets = []
         if input_keyword:
             top_tweets += app.search_cache("tweet", input_keyword, input_language)
@@ -129,21 +158,23 @@ def results_page():
                     st.sidebar.markdown(f"**{user_link}**")
                     st.sidebar.write(f"Followers: {followers_count}")
                     st.sidebar.write("---")
-            if metric == "Top Tweets":
-                query = {"retweeted_status": {"$exists": False}}
-                top_tweets_query = app.collection.find(query).sort("favorite_count", pymongo.DESCENDING).limit(5)
-                top_tweets = list(top_tweets_query)
+            elif metric == "Top Tweets":
+                # Fetch top tweets with highest favorite count
+                query_side = {"retweeted_status": {"$exists": False}}
+                top_tweets_query = app.collection.find(query_side).sort("favorite_count", pymongo.DESCENDING).limit(5)
+                top_tweets_side = list(top_tweets_query)
+                # Display top tweets on sidebar
                 st.sidebar.subheader("Top Tweets by Favorite Count")
-                for tweet in top_tweets:
-                    user_id = tweet.get('user_id', 'Unknown')
-                    user_info = app.search_cache("user", user_deets = [user_id, None])
-                    user_name = user_info.get('screen_name', 'Unknown') if user_info else 'Unknown'
-                    user_link = f"[@{user_name}](?page=user_info&username={user_name})"
-                    tweet_text = tweet.get('text', 'Unknown')
-                    favorite_count = tweet.get('favorite_count', 0)
-                    st.sidebar.write(f"User: @{user_link}")
-                    st.sidebar.write(f"Tweet: {tweet_text}")
-                    st.sidebar.write(f"Favorite Count: {favorite_count}")
+                for tweet in top_tweets_side:
+                    user_id_side = tweet.get('user_id', 'Unknown')
+                    user_info_side = app.search_cache("user", user_deets = [user_id_side, None])
+                    user_name_side = user_info_side.get('screen_name', 'Unknown') if user_info_side else 'Unknown'
+                    user_link_side = f"[@{user_name_side}](?page=user_info&username={user_name_side})"
+                    tweet_text_side = tweet.get('text', 'Unknown')
+                    favorite_count_side = tweet.get('favorite_count', 0)
+                    st.sidebar.write(f"User: @{user_link_side}")
+                    st.sidebar.write(f"Tweet: {tweet_text_side}")
+                    st.sidebar.write(f"Favorite Count: {favorite_count_side}")
                     st.sidebar.write("---")
         except Exception as e:
             st.error(f"Error occurred while fetching top users and tweets: {e}")
