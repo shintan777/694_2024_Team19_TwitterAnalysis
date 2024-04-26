@@ -11,9 +11,9 @@ import mysql.connector
 
 # For static cache implementation
 import nltk
-nltk.download('corpora')
 from nltk.corpus import stopwords
 from collections import Counter
+from nltk.tokenize import word_tokenize
 
 def mongo_db_connection():
     mongo_client = None
@@ -67,7 +67,6 @@ class TwitterSearchApp:
 
  
     def search_cache(self, entity, keyword = None, user_deets = [], lang="Select"):    # entity = "user" / "tweet" / "hashtag" 
-
         cache = self.cache[entity]
         if user_deets:
             uid, uname = user_deets[0], user_deets[1]
@@ -208,10 +207,15 @@ class TwitterSearchApp:
         print("Checkpointing")
         self.cache_collection.update_one({}, {'$set': {'cache': self.cache}}, upsert=True)
 
+    def extract_keywords(self, text, stop_words):
+        tokens = word_tokenize(text.lower())  # Tokenize text
+        filtered_tokens = [word for word in tokens if word.isalnum() and word not in stop_words]  # Remove stopwords and non-alphanumeric tokens
+        return filtered_tokens
+    
     def cache_top_10_keywords(self):
         # parse through each tweet and maintain a dict of top 10 keywords
         # Retrieve all tweets
-        print("Started caching top keywords in tweets: " + time.time())
+        print("Started caching top keywords in tweets: ",time.time())
         tweets = self.collection.find({}, {"text": 1})
 
         # Define stopwords - words to ignore
@@ -221,19 +225,19 @@ class TwitterSearchApp:
         keyword_count = Counter()
         for tweet in tweets:
             text = tweet["text"]
-            keywords = extract_keywords(text, stop_words)
+            keywords = self.extract_keywords(text, stop_words)
             keyword_count.update(keywords)
 
         # Get top 10 keywords and store in cache
         top_keywords = keyword_count.most_common(10)
         for keyword in top_keywords:
-            self.search_cache(keyword)
-        print("Completed caching top keywords in tweets: " + time.time())
+            self.search_cache("tweet",keyword[0])
+        print("Completed caching top keywords in tweets: ",time.time())
 
     def cron_cache_top_keywords(self):
-        print("Cron for caching has started at: " +  + time.time())
+        print("Cron for caching has started at: ", time.time())
         self.cache_top_10_keywords(self)
-        print("Cron for caching is completed at: " +  + time.time())
+        print("Cron for caching is completed at: ", time.time())
         
     def shutdown(self):
         print("Shutting down", self.cache)
@@ -242,6 +246,7 @@ class TwitterSearchApp:
 
 app = TwitterSearchApp(max_cache_size=10)
 app.load_cache_from_mongodb()
+app.cache_top_10_keywords()
 print(app.cache["tweet"].keys())
 
 # def main():
